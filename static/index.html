@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stream Extractor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d0d0d;
+      color: #e8e8e8;
+      font-family: system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+      color: #fff;
+      letter-spacing: -0.5px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 0.5rem;
+      width: 100%;
+      max-width: 720px;
+      margin-bottom: 1.5rem;
+    }
+
+    input[type="url"] {
+      flex: 1;
+      padding: 0.7rem 1rem;
+      border-radius: 8px;
+      border: 1px solid #333;
+      background: #1a1a1a;
+      color: #e8e8e8;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input[type="url"]:focus { border-color: #4f8ef7; }
+
+    button {
+      padding: 0.7rem 1.4rem;
+      border-radius: 8px;
+      border: none;
+      background: #4f8ef7;
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      white-space: nowrap;
+    }
+    button:hover { background: #3a78e0; }
+    button:disabled { background: #2d4a7a; cursor: not-allowed; }
+
+    #status {
+      font-size: 0.9rem;
+      color: #888;
+      margin-bottom: 1rem;
+      min-height: 1.2em;
+    }
+    #status.error { color: #f76f6f; }
+
+    .player-wrap {
+      width: 100%;
+      max-width: 960px;
+      background: #111;
+      border-radius: 12px;
+      overflow: hidden;
+      display: none;
+      flex-direction: column;
+    }
+    .player-wrap.visible { display: flex; }
+
+    #stream-title {
+      padding: 0.8rem 1rem;
+      font-size: 1rem;
+      font-weight: 600;
+      border-bottom: 1px solid #222;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    video {
+      width: 100%;
+      background: #000;
+      display: block;
+    }
+
+    .actions {
+      display: flex;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      border-top: 1px solid #222;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .actions a {
+      color: #4f8ef7;
+      font-size: 0.85rem;
+      text-decoration: none;
+    }
+    .actions a:hover { text-decoration: underline; }
+
+    .pip-btn {
+      margin-left: auto;
+      padding: 0.4rem 0.9rem;
+      font-size: 0.82rem;
+      font-weight: 500;
+      border-radius: 6px;
+      background: #1e2a3a;
+      border: 1px solid #2d4a7a;
+      color: #7ab4f7;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .pip-btn:hover { background: #253348; }
+  </style>
+</head>
+<body>
+  <h1>Stream Extractor</h1>
+
+  <div class="input-row">
+    <input type="url" id="url-input" placeholder="Paste a video URL (YouTube, Twitch, etc.)" />
+    <button id="extract-btn">Extract</button>
+  </div>
+
+  <div id="status"></div>
+
+  <div class="player-wrap" id="player-wrap">
+    <div id="stream-title"></div>
+    <video id="player" controls autoplay></video>
+    <div class="actions">
+      <a id="direct-link" href="#" target="_blank" rel="noopener">Direct stream link</a>
+      <button class="pip-btn" id="pip-btn" style="display:none">Picture-in-Picture</button>
+    </div>
+  </div>
+
+  <script>
+    const urlInput = document.getElementById('url-input');
+    const extractBtn = document.getElementById('extract-btn');
+    const status = document.getElementById('status');
+    const playerWrap = document.getElementById('player-wrap');
+    const player = document.getElementById('player');
+    const streamTitle = document.getElementById('stream-title');
+    const directLink = document.getElementById('direct-link');
+    const pipBtn = document.getElementById('pip-btn');
+
+    if (document.pictureInPictureEnabled) pipBtn.style.display = '';
+
+    pipBtn.addEventListener('click', () => {
+      if (document.pictureInPictureElement) {
+        document.exitPictureInPicture();
+      } else {
+        player.requestPictureInPicture();
+      }
+    });
+
+    async function extractStream() {
+      const url = urlInput.value.trim();
+      if (!url) { setStatus('Please enter a URL.', true); return; }
+
+      setStatus('Extracting stream…');
+      extractBtn.disabled = true;
+      playerWrap.classList.remove('visible');
+
+      try {
+        const res = await fetch('/extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        });
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+          setStatus(data.error || 'Extraction failed.', true);
+          return;
+        }
+
+        streamTitle.textContent = data.title || 'Stream';
+        player.src = data.url;
+        directLink.href = data.url;
+        playerWrap.classList.add('visible');
+        setStatus('');
+        player.play().catch(() => {});
+      } catch (e) {
+        setStatus('Network error. Is the server running?', true);
+      } finally {
+        extractBtn.disabled = false;
+      }
+    }
+
+    extractBtn.addEventListener('click', extractStream);
+    urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') extractStream(); });
+
+    function setStatus(msg, isError = false) {
+      status.textContent = msg;
+      status.className = isError ? 'error' : '';
+    }
+  </script>
+</body>
+</html>
