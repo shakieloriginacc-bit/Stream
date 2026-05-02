@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Stream Extractor</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -132,7 +133,7 @@
   <h1>Stream Extractor</h1>
 
   <div class="input-row">
-    <input type="url" id="url-input" placeholder="Paste a video URL (YouTube, Twitch, etc.)" />
+    <input type="url" id="url-input" placeholder="Paste a stream URL and hit Extract" />
     <button id="extract-btn">Extract</button>
   </div>
 
@@ -157,6 +158,8 @@
     const directLink = document.getElementById('direct-link');
     const pipBtn = document.getElementById('pip-btn');
 
+    let hlsInstance = null;
+
     if (document.pictureInPictureEnabled) pipBtn.style.display = '';
 
     pipBtn.addEventListener('click', () => {
@@ -167,11 +170,45 @@
       }
     });
 
+    function loadStream(streamUrl, isHls, referer) {
+      if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+      }
+
+      const proxyUrl = `/proxy?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}`;
+
+      if (isHls && Hls.isSupported()) {
+        hlsInstance = new Hls({
+          xhrSetup: (xhr, url) => {
+            // HLS segment requests go through our proxy too
+            if (!url.startsWith('/proxy')) {
+              const proxied = `/proxy?url=${encodeURIComponent(url)}&referer=${encodeURIComponent(referer)}`;
+              xhr.open('GET', proxied, true);
+            }
+          }
+        });
+        hlsInstance.loadSource(proxyUrl);
+        hlsInstance.attachMedia(player);
+        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => player.play().catch(() => {}));
+        hlsInstance.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) setStatus('Stream error: ' + data.details, true);
+        });
+      } else if (isHls && player.canPlayType('application/vnd.apple.mpegurl')) {
+        // Safari native HLS
+        player.src = proxyUrl;
+        player.play().catch(() => {});
+      } else {
+        player.src = proxyUrl;
+        player.play().catch(() => {});
+      }
+    }
+
     async function extractStream() {
       const url = urlInput.value.trim();
       if (!url) { setStatus('Please enter a URL.', true); return; }
 
-      setStatus('Extracting stream…');
+      setStatus('Extracting stream… this may take a few seconds');
       extractBtn.disabled = true;
       playerWrap.classList.remove('visible');
 
@@ -189,11 +226,11 @@
         }
 
         streamTitle.textContent = data.title || 'Stream';
-        player.src = data.url;
         directLink.href = data.url;
         playerWrap.classList.add('visible');
         setStatus('');
-        player.play().catch(() => {});
+
+        loadStream(data.url, data.is_hls, data.referer || url);
       } catch (e) {
         setStatus('Network error. Is the server running?', true);
       } finally {
